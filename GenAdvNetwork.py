@@ -85,15 +85,15 @@ def classifier(input_var=None):
 
     return network
 
+
 def synthesiser(input_var=None):
 
     #    https://gist.github.com/f0k/738fa2eedd9666b78404ed1751336f56
-    from lasagne.layers import InputLayer, ReshapeLayer, DenseLayer, batch_norm
 
-    network = InputLayer(shape=(None, 64), input_var=input_var)
+    network = lasagne.layers.InputLayer(shape=(None, 64), input_var=input_var)
     # fully-connected layer
     # project and reshape
-    network = lasagne.layers.DenseLayer(num_units=256)
+    network = lasagne.layers.DenseLayer(network, num_units=256)
     network = lasagne.layers.ReshapeLayer(network, (-1, 1024, 7, 7))
     network = lasagne.layers.Deconv2DLayer(
         incoming=network,
@@ -155,7 +155,7 @@ def iterate_minibatches(inputs, targets, batchsize, shuffle=False):
     yield (inputs[excerpt], targets[excerpt])
 
 
-def run(X_train, y_train, X_test, y_test, X_val, y_val, num_epochs, train_fn, val_fn, genfunc):
+def run(X_train, y_train, X_test, y_test, X_val, y_val, num_epochs, train_fn_classifier, train_fn_generator, val_fn, genfunc):
     print("Starting training...")
     # We iterate over epochs:
     for epoch in range(num_epochs):
@@ -167,7 +167,7 @@ def run(X_train, y_train, X_test, y_test, X_val, y_val, num_epochs, train_fn, va
 
         for batch in iterate_minibatches(X_train, y_train, batch_size, shuffle=True):
             inputs, targets = mixin(batch, genfunc)
-            train_err += train_fn(inputs, targets)
+            train_err += train_fn_classifier(inputs, targets)
             train_batches += 1
 
         # And a full pass over the validation data:
@@ -208,55 +208,68 @@ def run(X_train, y_train, X_test, y_test, X_val, y_val, num_epochs, train_fn, va
 def main(num_epochs=500):
 
     # Prepare Theano variables for inputs and targets
-    input_var = T.tensor4('inputs')
-    target_var = T.ivector('targets')
+    C_in = T.tensor4('inputs')
+    C_target = T.ivector('targets')
 
-    rand_var = T.vector('random')
-    gen_var = T.tensor4('genout')
+    G_in = T.matrix('random')
+    G_out = T.tensor4('genout')
 
 
     # Load the data
     (X_train, y_train, X_test,y_test, X_val, y_val) = load_dataset()
 
-    network = classifier(input_var)
+    # Classifier
+    C_network = classifier(C_in)
+    C_out = lasagne.layers.get_output(C_network)
+    C_params = lasagne.layers.get_all_params(C_network, trainable=True)
 
-    # Set up the loss function and training parameters
-    prediction = lasagne.layers.get_output(network)
 
-    # Define the generator function (that tries to create 'real' images)
-    synth_image_gen = partial(generator, shape=(img_rows, img_cols))
-    #generator_network = synthesiser(rand_var)
-    #synth_image_gen = lasagne.layers.get_output(generator_network)
+    # Define the synthesiser function (that tries to create 'real' images)
+    G_network = synthesiser(G_in)
+    G_out = lasagne.layers.get_output(G_network)
+    G_params = lasagne.layers.get_all_params(G_network, trainable=True)
 
-    # This is the original loss function
-    loss = lasagne.objectives.categorical_crossentropy(prediction, target_var)
-    loss = loss.mean()
-    params = lasagne.layers.get_all_params(network, trainable=True)
-    updates = lasagne.updates.nesterov_momentum(
-            loss, params, learning_rate=0.01, momentum=0.9)
+    # This is a runner, which is used to wire up the output of G_in, with C_out
+    # Runner
+    R_network = classifier(G_out)
+    R_out = lasagne.layers.get_output(R_network)
+    R_params = lasagne.layers.get_all_params(R_network, trainable=True)
 
-    # Devise a coupled loss function
-#    params_gen = lasagne.layers.get_all_params(generator_network, trainable=True)
+
+    # Define the objective, updates, and training functions
+    C_obj = lasagne.objectives.categorical_crossentropy(C_out, C_target).mean()
+    C_updates = lasagne.updates.nesterov_momentum(
+            C_obj, C_params, learning_rate=0.01, momentum=0.9)
+    C_train = theano.function([C_in, C_target], C_obj, updates=C_updates)
+
+    G_obj = -lasagne.objectives.categorical_crossentropy(R_out, C_target).mean()
+    G_updates = lasagne.updates.nesterov_momentum(
+            G_obj, G_params, learning_rate=0.01, momentum=0.9)
+    G_train = theano.function([G_in, C_target], G_obj, updates=G_updates)
+
+
+
+    # Create the theano functions
+    classify = theano.function([C_in], C_out)
+    generate = theano.function([G_in], G_out)
 
     # This section shouldn't change
-    test_prediction = lasagne.layers.get_output(network, deterministic=True)
+    test_prediction = lasagne.layers.get_output(C_network, deterministic=True)
     test_loss = lasagne.objectives.categorical_crossentropy(test_prediction,
-                                                            target_var)
+                                                            C_target)
     test_loss = test_loss.mean()
-    test_acc = T.mean(T.eq(T.argmax(test_prediction, axis=1), target_var),
+    test_acc = T.mean(T.eq(T.argmax(test_prediction, axis=1), C_target),
                       dtype=theano.config.floatX)
 
     # Compile the training and validation functions
-    train_fn = theano.function([input_var, target_var], loss, updates=updates)
-    val_fn = theano.function([input_var, target_var], [test_loss, test_acc])
-
-
-    # Incorporate the generator
-
-
+    val_fn = theano.function([C_in, C_target], [test_loss, test_acc])
 
     # Run
-    run(X_train, y_train, X_test, y_test, X_val, y_val, num_epochs, train_fn, val_fn, synth_image_gen)
+    run(X_train, y_train,
+        X_test, y_test,
+        X_val, y_val,
+        num_epochs,
+        C_train, G_train, val_fn, generate)
 
 if __name__=='__main__':
     main()
