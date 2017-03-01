@@ -49,16 +49,6 @@ def load_dataset():
 
     return (X_train, y_train, X_test,y_test, X_val, y_val)
 
-
-def generator(*, shape, n_examples):
-    """
-    This function generators random samples of images (to be trained by a nn
-    """
-    img_rows, img_cols = shape
-
-    yield np.random.rand(n_examples, 1, img_rows, img_cols).astype('float32')
-
-
 def classifier(input_var=None):
     network = lasagne.layers.InputLayer(shape=(None, 1, img_rows, img_cols),
                                         input_var=input_var)
@@ -90,11 +80,10 @@ def synthesiser(input_var=None):
 
     #    https://gist.github.com/f0k/738fa2eedd9666b78404ed1751336f56
 
-    network = lasagne.layers.InputLayer(shape=(None, 64), input_var=input_var)
-    # fully-connected layer
-    # project and reshape
-    network = lasagne.layers.DenseLayer(network, num_units=256)
-    network = lasagne.layers.ReshapeLayer(network, (-1, 1024, 7, 7))
+    network = lasagne.layers.InputLayer(shape=(None, 128, 1, 1), input_var=input_var)
+    network = lasagne.layers.Upscale2DLayer(network, scale_factor=98, mode='repeat')
+    print(lasagne.layers.get_output_shape(network))
+    network = lasagne.layers.ReshapeLayer(network, (-1, 256, 7, 7))
     network = lasagne.layers.Deconv2DLayer(
         incoming=network,
         num_filters=nb_filters,
@@ -111,6 +100,7 @@ def synthesiser(input_var=None):
         nonlinearity=lasagne.nonlinearities.rectify
    )
 
+    print(lasagne.layers.get_output_shape(network))
     network = lasagne.layers.ReshapeLayer(network, (-1, 1, img_rows, img_cols))
 
     return network
@@ -127,16 +117,18 @@ def mixin(batch, GenFunc):
     indices = np.arange(len(inputs))
     np.random.shuffle(indices)
 
-    inputs[0:NGenMB] = next(GenFunc(n_examples=NGenMB))
+    G_inseed =  np.random.rand(NGenMB, 128, 1, 1).astype('float32')
+    inputs[0:NGenMB] = GenFunc(G_inseed)
     targets[0:NGenMB] = np.zeros((NGenMB, )).astype('int32')
 
-    inputs[NGenMB:] += next(GenFunc(n_examples=(len(inputs)-NGenMB)))
+#    inputs[NGenMB:] += next(GenFunc(n_examples=(len(inputs)-NGenMB)))
 
-    IDX = inputs[NGenMB:] < 0.4
-    inputs[NGenMB:][IDX] = 0.0
 
-    IDX = inputs[NGenMB:] > 1
-    inputs[NGenMB:][IDX] = 1.0
+#    IDX = inputs[NGenMB:] < 0.4
+#    inputs[NGenMB:][IDX] = 0.0
+#
+#    IDX = inputs[NGenMB:] > 1
+#    inputs[NGenMB:][IDX] = 1.0
 
     return inputs[indices], targets[indices]
 
@@ -211,7 +203,7 @@ def main(num_epochs=500):
     C_in = T.tensor4('inputs')
     C_target = T.ivector('targets')
 
-    G_in = T.matrix('random')
+    G_in = T.tensor4('random')
     G_out = T.tensor4('genout')
 
 
