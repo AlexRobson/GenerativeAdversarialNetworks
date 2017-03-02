@@ -80,27 +80,30 @@ def synthesiser(input_var=None):
 
     #    https://gist.github.com/f0k/738fa2eedd9666b78404ed1751336f56
 
-    network = lasagne.layers.InputLayer(shape=(None, 128, 1, 1), input_var=input_var)
-    network = lasagne.layers.Upscale2DLayer(network, scale_factor=98, mode='repeat')
-    print(lasagne.layers.get_output_shape(network))
-    network = lasagne.layers.ReshapeLayer(network, (-1, 256, 7, 7))
+    network = lasagne.layers.InputLayer(shape=(None, 64, 1, 1), input_var=input_var)
+    network = lasagne.layers.Upscale2DLayer(network, scale_factor=7, mode='repeat')
+    print('L1:'+str(lasagne.layers.get_output_shape(network)))
+    network = lasagne.layers.ReshapeLayer(network, (-1, 64, 7, 7))
+    print('L1b:'+str(lasagne.layers.get_output_shape(network)))
     network = lasagne.layers.Deconv2DLayer(
         incoming=network,
         num_filters=nb_filters,
         filter_size=kernel_size,
         stride=2,
+        output_size=(14, 14),
         nonlinearity=lasagne.nonlinearities.rectify
         )
-
+    print('L2:'+str(lasagne.layers.get_output_shape(network)))
     network = lasagne.layers.Deconv2DLayer(
         incoming=network,
         num_filters=nb_filters,
         filter_size=kernel_size,
         stride=2,
+        output_size=(img_rows,img_cols),
         nonlinearity=lasagne.nonlinearities.rectify
    )
 
-    print(lasagne.layers.get_output_shape(network))
+    print('L3:'+str(lasagne.layers.get_output_shape(network)))
     network = lasagne.layers.ReshapeLayer(network, (-1, 1, img_rows, img_cols))
 
     return network
@@ -118,7 +121,10 @@ def mixin(batch, GenFunc):
     np.random.shuffle(indices)
 
     G_inseed =  np.random.rand(NGenMB, 128, 1, 1).astype('float32')
-    inputs[0:NGenMB] = GenFunc(G_inseed)
+    synthetic_images = GenFunc(G_inseed)
+    print(np.shape(synthetic_images))
+    print(NGenMB)
+    inputs[0:NGenMB] = synthetic_images
     targets[0:NGenMB] = np.zeros((NGenMB, )).astype('int32')
 
 #    inputs[NGenMB:] += next(GenFunc(n_examples=(len(inputs)-NGenMB)))
