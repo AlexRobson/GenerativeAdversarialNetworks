@@ -87,10 +87,15 @@ def synthesiser(input_var=None):
     network = lasagne.layers.InputLayer(shape=(None, NB, 1, 1), input_var=input_var)
     network = lasagne.layers.Upscale2DLayer(network, scale_factor=SF, mode='repeat')
     #print('L1:'+str(lasagne.layers.get_output_shape(network)))
+#    network = lasagne.layers.DenseLayer(
+#            lasagne.layers.dropout(network, p=.5),
+#            num_units=NB*SF*SF,
+#            nonlinearity=lasagne.nonlinearities.rectify
+#    )
     network = lasagne.layers.ReshapeLayer(network, (-1, NB, SF,SF))
     #print('L1b:'+str(lasagne.layers.get_output_shape(network)))
     network = lasagne.layers.Deconv2DLayer(
-        incoming=network,
+        incoming=lasagne.layers.dropout(network, p=.25),
         num_filters=nb_filters,
         filter_size=(3,3),
         stride=2,
@@ -98,20 +103,21 @@ def synthesiser(input_var=None):
         )
     #print('L2:'+str(lasagne.layers.get_output_shape(network)))
     network = lasagne.layers.Deconv2DLayer(
-        incoming=network,
-        num_filters=int(nb_filters/2),
+        incoming=lasagne.layers.dropout(network, p=.25),
+        num_filters=nb_filters,
         filter_size=(3,3),
         stride=2,
         nonlinearity=lasagne.nonlinearities.rectify
    )
     network = lasagne.layers.Deconv2DLayer(
-            incoming=network,
+            incoming=lasagne.layers.dropout(network, p=.25),
             num_filters=1,
             filter_size=(2,2),
             stride=2,
             crop='full',
             nonlinearity=lasagne.nonlinearities.rectify
     )
+
     #print('L3:'+str(lasagne.layers.get_output_shape(network)))
     network = lasagne.layers.ReshapeLayer(network, (-1, 1, img_rows, img_cols))
     #print('L4:'+str(lasagne.layers.get_output_shape(network)))
@@ -131,13 +137,12 @@ def iterate_minibatches(inputs, targets, batchsize, shuffle=False):
 
     yield (inputs[excerpt], targets[excerpt])
 
-def run(X_train, y_train, X_test, y_test, X_val, y_val, num_epochs, train_fn, val_fn, val_fn_gen):
+def run(X_train, y_train, X_test, y_test, X_val, y_val, num_epochs, train_fn, val_fn, val_fn_gen, G_params):
     print("Starting training...")
     # We iterate over epochs:
     train_err = {}
     valid_err = {}
     valid_acc = {}
-
     train_err['gen'] = []
     train_err['discrim'] = []
     valid_err['gen'] = []
@@ -145,6 +150,9 @@ def run(X_train, y_train, X_test, y_test, X_val, y_val, num_epochs, train_fn, va
     valid_acc['real'] = []
     valid_acc['synth'] = []
 
+    G_weights = {}
+
+    G_weights['W1'] = []
     for epoch in range(num_epochs):
         # In each epoch, we do a full pass over the training data:
         epoch_loss = {}
@@ -183,11 +191,11 @@ def run(X_train, y_train, X_test, y_test, X_val, y_val, num_epochs, train_fn, va
 
         train_err['gen'].append(epoch_loss['gen'])
         train_err['discrim'].append(epoch_loss['discrim'])
-        valid_err['discrim'].append(val_err)
-        valid_err['gen'].append(gen_err)
+        valid_err['discrim'].append(val_err / val_batches)
+        valid_err['gen'].append(gen_err / val_batches)
         valid_acc['real'].append(val_acc / val_batches * 100)
         valid_acc['synth'].append(gen_acc / val_batches * 100)
-
+        G_weights['W1'].append(np.median(G_params[2].get_value()))
         # Then we print the results for this epoch:
         print("Epoch {} of {} took {:.3f}s".format(
                 epoch + 1, num_epochs, time.time() - start_time))
@@ -214,7 +222,7 @@ def run(X_train, y_train, X_test, y_test, X_val, y_val, num_epochs, train_fn, va
     print("  test accuracy:\t\t{:.2f} %".format(
             test_acc / test_batches * 100))
 
-    return train_err, valid_err, valid_acc
+    return train_err, valid_err, valid_acc, G_weights
 
 def main(num_epochs=500):
     # https://gist.github.com/f0k/738fa2eedd9666b78404ed1751336f56
@@ -237,26 +245,32 @@ def main(num_epochs=500):
     real_out = lasagne.layers.get_output(C_network)
     # fake_out, second arg in get_output is optional inputs to pass through to C_network
     fake_out = lasagne.layers.get_output(C_network,
-                                         lasagne.layers.get_output(G_network))
+                                         lasagne.layers.get_output(G_network),
+                                         deterministic=True)
 
     # Define the objective, updates, and training functions
     # Cost = Fakes are class=1, so for generator target is for all to be identified as real (0)
-    G_obj = lasagne.objectives.binary_crossentropy(fake_out, 0).mean()
+    eps = 1e-10
+    alfa = 1-1e-5
+    G_obj = lasagne.objectives.binary_crossentropy((fake_out+eps)*alfa, 0).mean()
     # Cost = Discriminator needs real = 0, and identify fakes as 1
-    C_obj = lasagne.objectives.binary_crossentropy(real_out, 0).mean()+\
-        lasagne.objectives.binary_crossentropy(fake_out, 1).mean()
+    C_obj = lasagne.objectives.binary_crossentropy((real_out+eps)*alfa, 0).mean()+\
+        lasagne.objectives.binary_crossentropy((fake_out+eps)*alfa, 1).mean()
 
-    updates = lasagne.updates.nesterov_momentum(
-            C_obj, C_params, learning_rate=0.01, momentum=0.9)
 
 #    updates = lasagne.updates.adam(
 #            C_obj, C_params, learning_rate=2e-4, beta1=0.5)
-    updates.update = lasagne.updates.nesterov_momentum(
-            G_obj, G_params, learning_rate=0.01, momentum=0.9)
-
+#    updates.update(lasagne.updates.adam(
+#        G_obj, G_params, learning_rate=2e-4, beta1=0.5)
+#    )
+    updates = lasagne.updates.nesterov_momentum(
+            G_obj, G_params, learning_rate=0.010, momentum=0.9)
+    updates.update(lasagne.updates.nesterov_momentum(
+            C_obj, C_params, learning_rate=0.001, momentum=0.9))
+    # Loss output is always from the perspective of the discriminiator
     train_fn = theano.function([G_in, C_in],
-                               [(fake_out > 0.5).mean(),
-                                (fake_out < 0.5).mean()],
+                               [(fake_out < 0.5).mean(),
+                                (real_out > 0.5).mean()],
                                updates=updates,
                                name='training')
 
@@ -272,8 +286,9 @@ def main(num_epochs=500):
     test_acc = T.mean(test_prediction<0.5,
                       dtype=theano.config.floatX)
 
+    # Loss is from the perspective of the discriminator, so the target is for all values to be labelled true (0)
     test_generator = lasagne.layers.get_output(C_network,
-                                               lasagne.layers.get_output(G_network),
+                                               lasagne.layers.get_output(G_network, deterministic=True),
                                                deterministic=True)
     test_loss_gen = lasagne.objectives.binary_crossentropy(test_generator, 1).mean()
     test_acc_gen = T.mean(test_generator>0.5, dtype=theano.config.floatX)
@@ -287,7 +302,7 @@ def main(num_epochs=500):
         X_test, y_test,
         X_val, y_val,
         num_epochs,
-        train_fn, val_fn, val_gen_fn)
+        train_fn, val_fn, val_gen_fn, G_params)
 
     return generate, lossplots
 
@@ -297,26 +312,31 @@ def create_image(generate):
 
 
 def plotloss(lossplots):
-    train_err, val_err, val_acc = lossplots
+    train_err, val_err, val_acc, GW = lossplots
     plt.plot(train_err['discrim'])
     plt.plot(train_err['gen'])
     plt.plot(val_err['discrim'])
     plt.plot(val_err['gen'])
 
-    plt.legend(['Discriminator[Training] Loss', 'Generator[Training] Loss',
-                'Discriminator[Validation', 'Generator[Validation] loss'])
+    plt.legend(['Discriminator[Training][Real]', 'Discriminator[Training][Synth]',
+                'Discriminator[Validation][Real]', 'Discriminiator[Validation][Synth]'])
+    plt.title(' Loss plots')
     plt.show()
     plt.plot(val_acc['real'])
     plt.plot(val_acc['synth'])
     plt.legend(['% Accuracy on real data', '% Accuracy on synthetic data'])
     plt.show()
 
+    plt.plot(GW['W1'])
+    plt.show()
+
+
+
 if __name__=='__main__':
-    generate,lossplots = main(num_epochs=50)
+    generate,lossplots = main(num_epochs=500)
     rimg = create_image(generate).astype('float64').reshape(img_rows, img_cols)
     Image.fromarray((255*rimg/np.max(rimg[:])).astype('uint8')).save('test.jpeg')
     plotloss(lossplots)
-    pdb.set_trace()
 
 
 
