@@ -10,6 +10,7 @@ import theano.tensor as T
 import lasagne
 import numpy as np
 import time
+from PIL import Image
 from functools import partial
 import pdb
 
@@ -20,6 +21,7 @@ nb_epoch = 12
 nb_filters = 32 # Number of convolution filters
 pool_size = (2,2)
 kernel_size = (3,3)
+GIN = 32
 
 
 def load_dataset():
@@ -79,32 +81,41 @@ def classifier(input_var=None):
 def synthesiser(input_var=None):
 
     #    https://gist.github.com/f0k/738fa2eedd9666b78404ed1751336f56
-
-    network = lasagne.layers.InputLayer(shape=(None, 64, 1, 1), input_var=input_var)
-    network = lasagne.layers.Upscale2DLayer(network, scale_factor=7, mode='repeat')
-    print('L1:'+str(lasagne.layers.get_output_shape(network)))
-    network = lasagne.layers.ReshapeLayer(network, (-1, 64, 7, 7))
-    print('L1b:'+str(lasagne.layers.get_output_shape(network)))
+    SF =3
+    NB = GIN
+    network = lasagne.layers.InputLayer(shape=(None, NB, 1, 1), input_var=input_var)
+    bsize = lasagne.layers.get_output_shape(network)[0]
+    network = lasagne.layers.Upscale2DLayer(network, scale_factor=SF, mode='repeat')
+    #print('L1:'+str(lasagne.layers.get_output_shape(network)))
+    network = lasagne.layers.ReshapeLayer(network, (-1, NB, SF,SF))
+    #print('L1b:'+str(lasagne.layers.get_output_shape(network)))
     network = lasagne.layers.Deconv2DLayer(
         incoming=network,
         num_filters=nb_filters,
-        filter_size=kernel_size,
+        filter_size=(3,3),
         stride=2,
-        output_size=(14, 14),
         nonlinearity=lasagne.nonlinearities.rectify
         )
-    print('L2:'+str(lasagne.layers.get_output_shape(network)))
+    #print('L2:'+str(lasagne.layers.get_output_shape(network)))
     network = lasagne.layers.Deconv2DLayer(
         incoming=network,
-        num_filters=nb_filters,
-        filter_size=kernel_size,
+        num_filters=int(nb_filters/2),
+        filter_size=(3,3),
         stride=2,
-        output_size=(img_rows,img_cols),
         nonlinearity=lasagne.nonlinearities.rectify
    )
-
-    print('L3:'+str(lasagne.layers.get_output_shape(network)))
+    network = lasagne.layers.Deconv2DLayer(
+            incoming=network,
+            num_filters=1,
+            filter_size=(2,2),
+            stride=2,
+            crop='full',
+            nonlinearity=lasagne.nonlinearities.rectify
+    )
+    #print('L3:'+str(lasagne.layers.get_output_shape(network)))
     network = lasagne.layers.ReshapeLayer(network, (-1, 1, img_rows, img_cols))
+    #print('L4:'+str(lasagne.layers.get_output_shape(network)))
+    assert bsize==lasagne.layers.get_output_shape(network)[0]
 
     return network
 
@@ -116,14 +127,12 @@ def mixin(batch, GenFunc):
 #    assert len(inputs) == batch_size
     # Mix in images produced from the GenFunc
     # Choose a random number of generated images to mix in, and mix them in randomly
-    NGenMB = np.random.randint(0, len(inputs))
+    NGenMB = np.random.randint(1, len(inputs))
     indices = np.arange(len(inputs))
     np.random.shuffle(indices)
 
-    G_inseed =  np.random.rand(NGenMB, 128, 1, 1).astype('float32')
+    G_inseed =  np.random.rand(NGenMB, GIN, 1, 1).astype('float32')
     synthetic_images = GenFunc(G_inseed)
-    print(np.shape(synthetic_images))
-    print(NGenMB)
     inputs[0:NGenMB] = synthetic_images
     targets[0:NGenMB] = np.zeros((NGenMB, )).astype('int32')
 
@@ -136,7 +145,7 @@ def mixin(batch, GenFunc):
 #    IDX = inputs[NGenMB:] > 1
 #    inputs[NGenMB:][IDX] = 1.0
 
-    return inputs[indices], targets[indices]
+    return inputs[indices], targets[indices], G_inseed
 
 
 def iterate_minibatches(inputs, targets, batchsize, shuffle=False):
@@ -153,19 +162,21 @@ def iterate_minibatches(inputs, targets, batchsize, shuffle=False):
     yield (inputs[excerpt], targets[excerpt])
 
 
-def run(X_train, y_train, X_test, y_test, X_val, y_val, num_epochs, train_fn_classifier, train_fn_generator, val_fn, genfunc):
+def run(X_train, y_train, X_test, y_test, X_val, y_val, num_epochs, C_train, G_train, val_fn, genfunc):
     print("Starting training...")
     # We iterate over epochs:
     for epoch in range(num_epochs):
         # In each epoch, we do a full pass over the training data:
         train_err = 0
+        gen_error = 0
         train_batches = 0
         start_time = time.time()
 
 
         for batch in iterate_minibatches(X_train, y_train, batch_size, shuffle=True):
-            inputs, targets = mixin(batch, genfunc)
-            train_err += train_fn_classifier(inputs, targets)
+            inputs, targets, G_in = mixin(batch, genfunc)
+            train_err += C_train(inputs, targets)
+            gen_error += G_train(G_in, targets)
             train_batches += 1
 
         # And a full pass over the validation data:
@@ -173,7 +184,7 @@ def run(X_train, y_train, X_test, y_test, X_val, y_val, num_epochs, train_fn_cla
         val_acc = 0
         val_batches = 0
         for batch in iterate_minibatches(X_val, y_val, batch_size, shuffle=True):
-            inputs, targets = mixin(batch, genfunc)
+            inputs, targets, G_in = mixin(batch, genfunc)
             err, acc = val_fn(inputs, targets)
             val_err += err
             val_acc += acc
@@ -183,6 +194,7 @@ def run(X_train, y_train, X_test, y_test, X_val, y_val, num_epochs, train_fn_cla
         print("Epoch {} of {} took {:.3f}s".format(
                 epoch + 1, num_epochs, time.time() - start_time))
         print("  training loss:\t\t{:.6f}".format(train_err / train_batches))
+        print("  Generator loss:\t\t{:.6f}".format(gen_error / train_batches))
         print("  validation loss:\t\t{:.6f}".format(val_err / val_batches))
         print("  validation accuracy:\t\t{:.2f} %".format(
                 val_acc / val_batches * 100))
@@ -192,7 +204,7 @@ def run(X_train, y_train, X_test, y_test, X_val, y_val, num_epochs, train_fn_cla
     test_acc = 0
     test_batches = 0
     for batch in iterate_minibatches(X_test, y_test, batch_size, shuffle=True):
-        inputs, targets = mixin(batch, genfunc)
+        inputs, targets, G_in = mixin(batch, genfunc)
         err, acc = val_fn(inputs, targets)
         test_err += err
         test_acc += acc
@@ -235,12 +247,12 @@ def main(num_epochs=500):
 
 
     # Define the objective, updates, and training functions
-    C_obj = lasagne.objectives.categorical_crossentropy(C_out, C_target).mean()
+    C_obj = lasagne.objectives.binary_crossentropy(C_out, C_target).mean()
     C_updates = lasagne.updates.nesterov_momentum(
             C_obj, C_params, learning_rate=0.01, momentum=0.9)
     C_train = theano.function([C_in, C_target], C_obj, updates=C_updates)
 
-    G_obj = -lasagne.objectives.categorical_crossentropy(R_out, C_target).mean()
+    G_obj = lasagne.objectives.binary_crossentropy(R_out, C_target).mean()
     G_updates = lasagne.updates.nesterov_momentum(
             G_obj, G_params, learning_rate=0.01, momentum=0.9)
     G_train = theano.function([G_in, C_target], G_obj, updates=G_updates)
@@ -262,6 +274,7 @@ def main(num_epochs=500):
     # Compile the training and validation functions
     val_fn = theano.function([C_in, C_target], [test_loss, test_acc])
 
+#    pdb.set_trace()
     # Run
     run(X_train, y_train,
         X_test, y_test,
@@ -269,10 +282,17 @@ def main(num_epochs=500):
         num_epochs,
         C_train, G_train, val_fn, generate)
 
+    return generate
+
+def create_image(generate):
+    rimg = generate(np.random.rand(1, GIN, 1, 1).astype('float32'))
+    return rimg
+
+
 if __name__=='__main__':
-    main()
-
-
-
+    generate = main()
+    rimg = create_image(generate).astype('float64').reshape(img_rows, img_cols)
+    Image.fromarray((255*rimg/np.max(rimg[:])).astype('uint8')).save('test.jpeg')
+    pdb.set_trace()
 
 
