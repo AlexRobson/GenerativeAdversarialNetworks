@@ -12,17 +12,18 @@ import numpy as np
 import time
 from PIL import Image
 from functools import partial
+import matplotlib.pyplot as plt
 import pdb
 
 img_rows, img_cols = 28,28 # Input image dimensions
 batch_size = 128
-nb_classes = 2
+nb_classes = 1
 nb_epoch = 12
 nb_filters = 32 # Number of convolution filters
 pool_size = (2,2)
 kernel_size = (3,3)
 GIN = 32
-
+shuffleset = False
 
 def load_dataset():
     # Load the data
@@ -71,7 +72,7 @@ def classifier(input_var=None):
     network = lasagne.layers.DenseLayer(
             lasagne.layers.dropout(network, p=.5),
             num_units=nb_classes,
-            nonlinearity=lasagne.nonlinearities.softmax)
+            nonlinearity=lasagne.nonlinearities.sigmoid)
 
     network = lasagne.layers.ReshapeLayer(network, (-1, nb_classes))
 
@@ -130,23 +131,35 @@ def iterate_minibatches(inputs, targets, batchsize, shuffle=False):
 
     yield (inputs[excerpt], targets[excerpt])
 
-def run(X_train, y_train, X_test, y_test, X_val, y_val, num_epochs, train_fn, val_fn, genfunc):
+def run(X_train, y_train, X_test, y_test, X_val, y_val, num_epochs, train_fn, val_fn, val_fn_gen):
     print("Starting training...")
     # We iterate over epochs:
+    train_err = {}
+    valid_err = {}
+    valid_acc = {}
+
+    train_err['gen'] = []
+    train_err['discrim'] = []
+    valid_err['gen'] = []
+    valid_err['discrim'] = []
+    valid_acc['real'] = []
+    valid_acc['synth'] = []
+
     for epoch in range(num_epochs):
         # In each epoch, we do a full pass over the training data:
-        train_err = 0
-        gen_err = 0
+        epoch_loss = {}
+        epoch_loss['gen'] = 0
+        epoch_loss['discrim'] = 0
         train_batches = 0
         start_time = time.time()
 
 
-        for batch in iterate_minibatches(X_train, y_train, batch_size, shuffle=True):
+        for batch in iterate_minibatches(X_train, y_train, batch_size, shuffle=shuffleset):
             inputs, targets= batch
             Gseed = lasagne.utils.floatX(np.random.rand(len(inputs), GIN, 1,1))
             loss = np.array(train_fn(Gseed, inputs))
-            gen_err += loss[0]
-            train_err += loss[1]
+            epoch_loss['gen'] += loss[0]
+            epoch_loss['discrim'] += loss[1]
 
             train_batches += 1
 
@@ -154,27 +167,43 @@ def run(X_train, y_train, X_test, y_test, X_val, y_val, num_epochs, train_fn, va
         val_err = 0
         val_acc = 0
         val_batches = 0
-        for batch in iterate_minibatches(X_val, y_val, batch_size, shuffle=True):
+        gen_err = 0
+        gen_acc = 0
+        for batch in iterate_minibatches(X_val, y_val, batch_size, shuffle=shuffleset):
             inputs, targets = batch
+#            err, acc = val_fn(inputs)
+            Gseed = lasagne.utils.floatX(np.random.rand(len(inputs), GIN, 1,1))
             err, acc = val_fn(inputs)
             val_err += err
             val_acc += acc
+            err, acc = val_fn_gen(Gseed)
+            gen_err += err
+            gen_acc += acc
             val_batches += 1
+
+        train_err['gen'].append(epoch_loss['gen'])
+        train_err['discrim'].append(epoch_loss['discrim'])
+        valid_err['discrim'].append(val_err)
+        valid_err['gen'].append(gen_err)
+        valid_acc['real'].append(val_acc / val_batches * 100)
+        valid_acc['synth'].append(gen_acc / val_batches * 100)
 
         # Then we print the results for this epoch:
         print("Epoch {} of {} took {:.3f}s".format(
                 epoch + 1, num_epochs, time.time() - start_time))
-        print("  training loss:\t\t{:.6f}".format(train_err / train_batches))
-        print("  Generator loss:\t\t{:.6f}".format(gen_err / train_batches))
-        print("  validation loss:\t\t{:.6f}".format(val_err / val_batches))
-        print("  validation accuracy:\t\t{:.2f} %".format(
+        print("  Discriminator[Train] loss:\t\t\t{:.6f}".format(epoch_loss['discrim'] / train_batches))
+        print("  Discriminator[Valid] loss:\t\t\t{:.6f}".format(val_err / val_batches))
+        print("  Generator[Train] loss:\t\t\t{:.6f}".format(epoch_loss['gen'] / train_batches))
+        print("  Discriminator[real] acc:\t\t\t{:.2f} %".format(
                 val_acc / val_batches * 100))
+        print("  Discriminator[synthetic] acc\t\t\t{:.2f} %".format(
+                gen_acc / val_batches * 100))
 
     # After training, we compute and print the test error:
     test_err = 0
     test_acc = 0
     test_batches = 0
-    for batch in iterate_minibatches(X_test, y_test, batch_size, shuffle=True):
+    for batch in iterate_minibatches(X_test, y_test, batch_size, shuffle=shuffleset):
         inputs, targets = batch
         err, acc = val_fn(inputs)
         test_err += err
@@ -185,6 +214,7 @@ def run(X_train, y_train, X_test, y_test, X_val, y_val, num_epochs, train_fn, va
     print("  test accuracy:\t\t{:.2f} %".format(
             test_acc / test_batches * 100))
 
+    return train_err, valid_err, valid_acc
 
 def main(num_epochs=500):
     # https://gist.github.com/f0k/738fa2eedd9666b78404ed1751336f56
@@ -210,20 +240,23 @@ def main(num_epochs=500):
                                          lasagne.layers.get_output(G_network))
 
     # Define the objective, updates, and training functions
-    # Cost = all fake classed as 1(fake)
-    G_obj = lasagne.objectives.binary_crossentropy(fake_out, 1).mean()
-    # Cost = all real classed as fake plus all fake classed as real
-    C_obj = lasagne.objectives.binary_crossentropy(real_out, 1).mean()+\
-        lasagne.objectives.binary_crossentropy(fake_out, 0).mean()
+    # Cost = Fakes are class=1, so for generator target is for all to be identified as real (0)
+    G_obj = lasagne.objectives.binary_crossentropy(fake_out, 0).mean()
+    # Cost = Discriminator needs real = 0, and identify fakes as 1
+    C_obj = lasagne.objectives.binary_crossentropy(real_out, 0).mean()+\
+        lasagne.objectives.binary_crossentropy(fake_out, 1).mean()
 
     updates = lasagne.updates.nesterov_momentum(
             C_obj, C_params, learning_rate=0.01, momentum=0.9)
 
+#    updates = lasagne.updates.adam(
+#            C_obj, C_params, learning_rate=2e-4, beta1=0.5)
     updates.update = lasagne.updates.nesterov_momentum(
             G_obj, G_params, learning_rate=0.01, momentum=0.9)
 
     train_fn = theano.function([G_in, C_in],
-                               [G_obj, C_obj],
+                               [(fake_out > 0.5).mean(),
+                                (fake_out < 0.5).mean()],
                                updates=updates,
                                name='training')
 
@@ -234,33 +267,56 @@ def main(num_epochs=500):
     # The test prediction is running the discriminator deterministically. All the validation set are
     # real, so the cost is when identifiying as fake (1)
     test_prediction = lasagne.layers.get_output(C_network, deterministic=True)
-    test_loss = lasagne.objectives.binary_crossentropy(test_prediction, 1)
+    test_loss = lasagne.objectives.binary_crossentropy(test_prediction, 0)
     test_loss = test_loss.mean()
-    test_acc = T.mean(T.eq(T.argmax(test_prediction, axis=1), 0),
+    test_acc = T.mean(test_prediction<0.5,
                       dtype=theano.config.floatX)
+
+    test_generator = lasagne.layers.get_output(C_network,
+                                               lasagne.layers.get_output(G_network),
+                                               deterministic=True)
+    test_loss_gen = lasagne.objectives.binary_crossentropy(test_generator, 1).mean()
+    test_acc_gen = T.mean(test_generator>0.5, dtype=theano.config.floatX)
 
     # Compile the training and validation functions
     val_fn = theano.function([C_in], [test_loss, test_acc])
-
+    val_gen_fn = theano.function([G_in], [test_loss_gen, test_acc_gen])
 #    pdb.set_trace()
     # Run
-    run(X_train, y_train,
+    lossplots = run(X_train, y_train,
         X_test, y_test,
         X_val, y_val,
         num_epochs,
-        train_fn, val_fn, generate)
+        train_fn, val_fn, val_gen_fn)
 
-    return generate
+    return generate, lossplots
 
 def create_image(generate):
     rimg = generate(np.random.rand(1, GIN, 1, 1).astype('float32'))
     return rimg
 
 
+def plotloss(lossplots):
+    train_err, val_err, val_acc = lossplots
+    plt.plot(train_err['discrim'])
+    plt.plot(train_err['gen'])
+    plt.plot(val_err['discrim'])
+    plt.plot(val_err['gen'])
+
+    plt.legend(['Discriminator[Training] Loss', 'Generator[Training] Loss',
+                'Discriminator[Validation', 'Generator[Validation] loss'])
+    plt.show()
+    plt.plot(val_acc['real'])
+    plt.plot(val_acc['synth'])
+    plt.legend(['% Accuracy on real data', '% accuracy on synthetic data'])
+    plt.show()
+
 if __name__=='__main__':
-    generate = main()
+    generate,lossplots = main(num_epochs=50)
     rimg = create_image(generate).astype('float64').reshape(img_rows, img_cols)
     Image.fromarray((255*rimg/np.max(rimg[:])).astype('uint8')).save('test.jpeg')
+    plotloss(lossplots)
     pdb.set_trace()
+
 
 
