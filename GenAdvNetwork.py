@@ -308,7 +308,7 @@ def plotloss(lossplots):
     plt.show()
     plt.plot(val_acc['real'])
     plt.plot(val_acc['synth'])
-    plt.legend(['% Accuracy on real data', '% accuracy on synthetic data'])
+    plt.legend(['% Accuracy on real data', '% Accuracy on synthetic data'])
     plt.show()
 
 if __name__=='__main__':
