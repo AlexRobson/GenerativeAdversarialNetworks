@@ -271,6 +271,7 @@ def main(num_epochs=500):
     updates.update(lasagne.updates.adam(
         G_obj, G_params, learning_rate=2e-4, beta1=0.5)
     )
+    
 #    updates = lasagne.updates.nesterov_momentum(
 #            G_obj, G_params, learning_rate=0.010, momentum=0.9)
 #    updates.update(lasagne.updates.nesterov_momentum(
