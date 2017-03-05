@@ -97,7 +97,7 @@ def synthesiser(input_var=None):
     print('L1:'+str(lasagne.layers.get_output_shape(network)))
     network = lasagne.layers.ReshapeLayer(network, (-1, 1024))
     network = batch_norm(lasagne.layers.DenseLayer(
-                lasagne.layers.dropout(network, p=.5),
+#                lasagne.layers.dropout(network, p=.5),
                 num_units=128*7*7,
                 nonlinearity=lasagne.nonlinearities.rectify
         ))
@@ -313,9 +313,13 @@ def main(num_epochs=500):
 
     return generate, lossplots
 
-def create_image(generate, N=1):
-    rimg = generate(np.random.rand(N, GIN, 1, 1).astype('float32'))
-    return rimg
+def create_image(generate, N=1, M=1):
+    rimg = generate(np.random.rand(N*M, GIN, 1, 1).astype('float32'))\
+        .astype('float64').reshape(N, M, img_rows, img_cols).transpose(0, 2, 1, 3)
+    plt.imsave('test.png', rimg.reshape(N*img_rows, M*img_cols), cmap='gray')
+
+    #Image.fromarray((255*rimg/np.max(rimg[:])).astype('uint8')).save('test.jpeg')
+    return None
 
 
 def plotloss(lossplots):
@@ -339,10 +343,11 @@ def plotloss(lossplots):
 
 
 
+
+
 if __name__=='__main__':
     generate,lossplots = main(num_epochs=500)
-    rimg = create_image(generate).astype('float64').reshape(img_rows, img_cols)
-    Image.fromarray((255*rimg/np.max(rimg[:])).astype('uint8')).save('test.jpeg')
+    create_image(generate, 6, 7)
     plotloss(lossplots)
     pdb.set_trace()
 
