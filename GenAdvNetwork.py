@@ -15,6 +15,8 @@ from functools import partial
 import matplotlib.pyplot as plt
 import pdb
 
+from lasagne.layers import batch_norm
+
 img_rows, img_cols = 28,28 # Input image dimensions
 batch_size = 128
 nb_classes = 1
@@ -85,30 +87,31 @@ def synthesiser(input_var=None):
     SF =3
     NB = GIN
     network = lasagne.layers.InputLayer(shape=(None, NB, 1, 1), input_var=input_var)
-    network = lasagne.layers.Upscale2DLayer(network, scale_factor=SF, mode='repeat')
-    #print('L1:'+str(lasagne.layers.get_output_shape(network)))
-#    network = lasagne.layers.DenseLayer(
-#            lasagne.layers.dropout(network, p=.5),
-#            num_units=NB*SF*SF,
-#            nonlinearity=lasagne.nonlinearities.rectify
-#    )
-    network = lasagne.layers.ReshapeLayer(network, (-1, NB, SF,SF))
-    #print('L1b:'+str(lasagne.layers.get_output_shape(network)))
-    network = lasagne.layers.Deconv2DLayer(
+#    network = batch_norm(lasagne.layers.Upscale2DLayer(network, scale_factor=SF, mode='repeat'))
+    print('L0:'+str(lasagne.layers.get_output_shape(network)))
+    network = batch_norm(lasagne.layers.DenseLayer(
+            lasagne.layers.dropout(network, p=.5),
+            num_units=1024,
+            nonlinearity=lasagne.nonlinearities.rectify
+    ))
+    print('L1:'+str(lasagne.layers.get_output_shape(network)))
+    network = lasagne.layers.ReshapeLayer(network, (-1, 1024))
+    network = batch_norm(lasagne.layers.DenseLayer(
+                lasagne.layers.dropout(network, p=.5),
+                num_units=128*7*7,
+                nonlinearity=lasagne.nonlinearities.rectify
+        ))
+    print('L2:'+str(lasagne.layers.get_output_shape(network)))
+    network = lasagne.layers.ReshapeLayer(network, (-1, 128, 7, 7))
+    network = batch_norm(lasagne.layers.Deconv2DLayer(
         incoming=lasagne.layers.dropout(network, p=.25),
-        num_filters=nb_filters,
+        num_filters= 64,
         filter_size=(3,3),
         stride=2,
         nonlinearity=lasagne.nonlinearities.rectify
-        )
-    #print('L2:'+str(lasagne.layers.get_output_shape(network)))
-    network = lasagne.layers.Deconv2DLayer(
-        incoming=lasagne.layers.dropout(network, p=.25),
-        num_filters=nb_filters,
-        filter_size=(3,3),
-        stride=2,
-        nonlinearity=lasagne.nonlinearities.rectify
-   )
+   ))
+    print('L3:'+str(lasagne.layers.get_output_shape(network)))
+#    network = lasagne.layers.ReshapeLayer(network, (-1, 128, 7, 7))
     network = lasagne.layers.Deconv2DLayer(
             incoming=lasagne.layers.dropout(network, p=.25),
             num_filters=1,
@@ -117,10 +120,15 @@ def synthesiser(input_var=None):
             crop='full',
             nonlinearity=lasagne.nonlinearities.rectify
     )
+#    network = lasagne.layers.DenseLayer(
+#            lasagne.layers.dropout(network, p=.5),
+#            num_units=1*img_rows*img_cols,
+#            nonlinearity=lasagne.nonlinearities.rectify
+#    )
 
-    #print('L3:'+str(lasagne.layers.get_output_shape(network)))
+    print('L4:'+str(lasagne.layers.get_output_shape(network)))
     network = lasagne.layers.ReshapeLayer(network, (-1, 1, img_rows, img_cols))
-    #print('L4:'+str(lasagne.layers.get_output_shape(network)))
+    print('L5:'+str(lasagne.layers.get_output_shape(network)))
 
     return network
 
@@ -252,25 +260,24 @@ def main(num_epochs=500):
     # Cost = Fakes are class=1, so for generator target is for all to be identified as real (0)
     eps = 1e-10
     alfa = 1-1e-5
-    G_obj = lasagne.objectives.binary_crossentropy((fake_out+eps)*alfa, 0).mean()
+    G_obj = lasagne.objectives.binary_crossentropy((fake_out+eps)*alfa, 1).mean()
     # Cost = Discriminator needs real = 0, and identify fakes as 1
-    C_obj = lasagne.objectives.binary_crossentropy((real_out+eps)*alfa, 0).mean()+\
-        lasagne.objectives.binary_crossentropy((fake_out+eps)*alfa, 1).mean()
+    C_obj = lasagne.objectives.binary_crossentropy((real_out+eps)*alfa, 1).mean()+\
+        lasagne.objectives.binary_crossentropy((fake_out+eps)*alfa, 0).mean()
 
 
-#    updates = lasagne.updates.adam(
-#            C_obj, C_params, learning_rate=2e-4, beta1=0.5)
-#    updates.update(lasagne.updates.adam(
-#        G_obj, G_params, learning_rate=2e-4, beta1=0.5)
-#    )
-    updates = lasagne.updates.nesterov_momentum(
-            G_obj, G_params, learning_rate=0.010, momentum=0.9)
-    updates.update(lasagne.updates.nesterov_momentum(
-            C_obj, C_params, learning_rate=0.001, momentum=0.9))
-    # Loss output is always from the perspective of the discriminiator
+    updates = lasagne.updates.adam(
+            C_obj, C_params, learning_rate=2e-4, beta1=0.5)
+    updates.update(lasagne.updates.adam(
+        G_obj, G_params, learning_rate=2e-4, beta1=0.5)
+    )
+#    updates = lasagne.updates.nesterov_momentum(
+#            G_obj, G_params, learning_rate=0.010, momentum=0.9)
+#    updates.update(lasagne.updates.nesterov_momentum(
+#            C_obj, C_params, learning_rate=0.010, momentum=0.9))
+#    # Loss output is always from the perspective of the discriminiator
     train_fn = theano.function([G_in, C_in],
-                               [(fake_out < 0.5).mean(),
-                                (real_out > 0.5).mean()],
+                               [G_obj,C_obj],
                                updates=updates,
                                name='training')
 
@@ -281,17 +288,17 @@ def main(num_epochs=500):
     # The test prediction is running the discriminator deterministically. All the validation set are
     # real, so the cost is when identifiying as fake (1)
     test_prediction = lasagne.layers.get_output(C_network, deterministic=True)
-    test_loss = lasagne.objectives.binary_crossentropy(test_prediction, 0)
+    test_loss = lasagne.objectives.binary_crossentropy(test_prediction, 1)
     test_loss = test_loss.mean()
-    test_acc = T.mean(test_prediction<0.5,
+    test_acc = T.mean(test_prediction>0.5,
                       dtype=theano.config.floatX)
 
     # Loss is from the perspective of the discriminator, so the target is for all values to be labelled true (0)
     test_generator = lasagne.layers.get_output(C_network,
                                                lasagne.layers.get_output(G_network, deterministic=True),
                                                deterministic=True)
-    test_loss_gen = lasagne.objectives.binary_crossentropy(test_generator, 1).mean()
-    test_acc_gen = T.mean(test_generator>0.5, dtype=theano.config.floatX)
+    test_loss_gen = lasagne.objectives.binary_crossentropy(test_generator, 0).mean()
+    test_acc_gen = T.mean(test_generator<0.5, dtype=theano.config.floatX)
 
     # Compile the training and validation functions
     val_fn = theano.function([C_in], [test_loss, test_acc])
@@ -306,8 +313,8 @@ def main(num_epochs=500):
 
     return generate, lossplots
 
-def create_image(generate):
-    rimg = generate(np.random.rand(1, GIN, 1, 1).astype('float32'))
+def create_image(generate, N=1):
+    rimg = generate(np.random.rand(N, GIN, 1, 1).astype('float32'))
     return rimg
 
 
@@ -337,6 +344,7 @@ if __name__=='__main__':
     rimg = create_image(generate).astype('float64').reshape(img_rows, img_cols)
     Image.fromarray((255*rimg/np.max(rimg[:])).astype('uint8')).save('test.jpeg')
     plotloss(lossplots)
+    pdb.set_trace()
 
 
 
