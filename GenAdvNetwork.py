@@ -10,8 +10,6 @@ import theano.tensor as T
 import lasagne
 import numpy as np
 import time
-from PIL import Image
-from functools import partial
 import matplotlib.pyplot as plt
 import pdb
 
@@ -29,9 +27,6 @@ shuffleset = False
 
 def load_dataset():
     # Load the data
-    #    X_training, X_testing, input_shape = load_dataset()
-    #    y_training = np.ones((len(X_training), 1))
-    #    y_testing = np.ones((len(X_testing), 1))
 
     (X_train, y_train), (X_test, y_test) = mnist.load_data()
     X_train = X_train.astype('float32')
@@ -83,11 +78,8 @@ def classifier(input_var=None):
 
 def synthesiser(input_var=None):
 
-    #    https://gist.github.com/f0k/738fa2eedd9666b78404ed1751336f56
-    SF =3
     NB = GIN
     network = lasagne.layers.InputLayer(shape=(None, NB, 1, 1), input_var=input_var)
-#    network = batch_norm(lasagne.layers.Upscale2DLayer(network, scale_factor=SF, mode='repeat'))
     print('L0:'+str(lasagne.layers.get_output_shape(network)))
     network = batch_norm(lasagne.layers.DenseLayer(
             incoming=network,
@@ -111,7 +103,6 @@ def synthesiser(input_var=None):
         nonlinearity=lasagne.nonlinearities.rectify
    ))
     print('L3:'+str(lasagne.layers.get_output_shape(network)))
-#    network = lasagne.layers.ReshapeLayer(network, (-1, 128, 7, 7))
     network = lasagne.layers.Deconv2DLayer(
             incoming=lasagne.layers.dropout(network, p=.25),
             num_filters=1,
@@ -120,11 +111,6 @@ def synthesiser(input_var=None):
             crop='full',
             nonlinearity=lasagne.nonlinearities.rectify
     )
-#    network = lasagne.layers.DenseLayer(
-#            lasagne.layers.dropout(network, p=.5),
-#            num_units=1*img_rows*img_cols,
-#            nonlinearity=lasagne.nonlinearities.rectify
-#    )
 
     print('L4:'+str(lasagne.layers.get_output_shape(network)))
     network = lasagne.layers.ReshapeLayer(network, (-1, 1, img_rows, img_cols))
@@ -271,12 +257,6 @@ def main(num_epochs=500):
     updates.update(lasagne.updates.adam(
         G_obj, G_params, learning_rate=2e-4, beta1=0.5)
     )
-    
-#    updates = lasagne.updates.nesterov_momentum(
-#            G_obj, G_params, learning_rate=0.010, momentum=0.9)
-#    updates.update(lasagne.updates.nesterov_momentum(
-#            C_obj, C_params, learning_rate=0.010, momentum=0.9))
-#    # Loss output is always from the perspective of the discriminiator
     train_fn = theano.function([G_in, C_in],
                                [G_obj,C_obj],
                                updates=updates,
