@@ -20,7 +20,7 @@ from utils.saveload import savemodel
 configs = {}
 configs['img_rows'], configs['img_cols'] = 28,28 # Input image dimensions
 configs['batch_size'] = 128
-configs['GIN'] = 32
+configs['GIN'] = 100
 configs['shuffleset'] = False
 
 
@@ -131,11 +131,11 @@ def main(num_epochs=500, configs=configs):
 
 
 if __name__=='__main__':
-    generate,networks, lossplots = main(num_epochs=50, configs=configs)
+    generate,networks, lossplots = main(num_epochs=500, configs=configs)
     savemodel(networks['generator'], 'generator.npz')
+    savemodel(networks['classifier'], 'discriminator.npz')
     create_image(generate, 6, 7, configs=configs)
     plotloss(lossplots)
-    pdb.set_trace()
 
 
 
