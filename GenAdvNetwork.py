@@ -90,21 +90,21 @@ def synthesiser(input_var=None):
 #    network = batch_norm(lasagne.layers.Upscale2DLayer(network, scale_factor=SF, mode='repeat'))
     print('L0:'+str(lasagne.layers.get_output_shape(network)))
     network = batch_norm(lasagne.layers.DenseLayer(
-            lasagne.layers.dropout(network, p=.5),
+            incoming=network,
             num_units=1024,
             nonlinearity=lasagne.nonlinearities.rectify
     ))
     print('L1:'+str(lasagne.layers.get_output_shape(network)))
     network = lasagne.layers.ReshapeLayer(network, (-1, 1024))
     network = batch_norm(lasagne.layers.DenseLayer(
-#                lasagne.layers.dropout(network, p=.5),
+                incoming=network,
                 num_units=128*7*7,
                 nonlinearity=lasagne.nonlinearities.rectify
         ))
     print('L2:'+str(lasagne.layers.get_output_shape(network)))
     network = lasagne.layers.ReshapeLayer(network, (-1, 128, 7, 7))
     network = batch_norm(lasagne.layers.Deconv2DLayer(
-        incoming=lasagne.layers.dropout(network, p=.25),
+        incoming=network,
         num_filters= 64,
         filter_size=(3,3),
         stride=2,
