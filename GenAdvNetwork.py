@@ -4,18 +4,16 @@ and fake generated data
 
 '''
 
-from keras.datasets import mnist
 import theano
 import theano.tensor as T
 import lasagne
 import numpy as np
 import pdb
 
-from networks import synthesiser, classifier
+from networks import synthesiser, discriminator
 from run import run
 from utils.plotting import create_image, plotloss
-from utils.saveload import savemodel
-
+from utils.saveload import savemodel, load_dataset
 
 configs = {}
 configs['img_rows'], configs['img_cols'] = 28,28 # Input image dimensions
@@ -24,29 +22,6 @@ configs['GIN'] = 100
 configs['shuffleset'] = False
 
 
-def load_dataset():
-    # Load the data
-
-    (X_train, y_train), (X_test, y_test) = mnist.load_data()
-    X_train = X_train.astype('float32')
-    X_test = X_test.astype('float32')
-    X_train /= 255
-    X_test /= 255
-
-    X_train = X_train.reshape(-1, 1, configs['img_rows'], configs['img_cols'])
-    #    y_train = X_train.reshape(-1, 1, img_rows, img_cols)
-    X_test = X_test.reshape(-1, 1, configs['img_rows'], configs['img_cols'])
-    #    y_test = X_train.reshape(-1, 1, img_rows, img_cols)
-
-    # We reserve the last 10000 training examples for validation.
-    X_train, X_val = X_train[:-10000], X_train[-10000:]
-    y_train, y_val = y_train[:-10000], y_train[-10000:]
-
-    y_train = np.ones(y_train.shape).astype('int32')
-    y_test = np.ones(y_test.shape).astype('int32')
-    y_val = np.ones(y_val.shape).astype('int32')
-
-    return (X_train, y_train, X_test,y_test, X_val, y_val)
 
 
 def main(num_epochs=500, configs=configs):
@@ -56,10 +31,10 @@ def main(num_epochs=500, configs=configs):
     G_in = T.tensor4('random')
 
     # Load the data
-    (X_train, y_train, X_test,y_test, X_val, y_val) = load_dataset()
+    (X_train, y_train, X_test,y_test, X_val, y_val) = load_dataset(configs=configs)
 
     # Classifier
-    C_network = classifier(C_in, configs=configs)
+    C_network = discriminator(C_in, configs=configs)
     C_out = lasagne.layers.get_output(C_network)
     C_params = lasagne.layers.get_all_params(C_network, trainable=True)
 
@@ -125,7 +100,7 @@ def main(num_epochs=500, configs=configs):
 
     networks = {}
     networks['generator'] = G_network
-    networks['classifier'] = C_network
+    networks['discriminator'] = C_network
 
     return generate, networks, lossplots
 
@@ -133,7 +108,7 @@ def main(num_epochs=500, configs=configs):
 if __name__=='__main__':
     generate,networks, lossplots = main(num_epochs=500, configs=configs)
     savemodel(networks['generator'], 'generator.npz')
-    savemodel(networks['classifier'], 'discriminator.npz')
+    savemodel(networks['discriminator'], 'discriminator.npz')
     create_image(generate, 6, 7, configs=configs)
     plotloss(lossplots)
 

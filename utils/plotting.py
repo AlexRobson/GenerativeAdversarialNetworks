@@ -2,11 +2,16 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 
-def create_image(generate, N=1, M=1, configs=None):
+def create_image(generate, N=1, M=1, name='test.png', seed=None, configs=None):
+	if seed is None:
+		np.random.seed(seed=42)
+	else:
+		np.random.seed(seed=seed)
+
+
 	rimg = generate(np.random.rand(N*M, configs['GIN'], 1, 1).astype('float32')) \
 		.astype('float64').reshape(N, M, configs['img_rows'], configs['img_cols']).transpose(0, 2, 1, 3)
-	plt.imsave('test.png', rimg.reshape(N*configs['img_rows'], M*configs['img_cols']), cmap='gray')
-
+	plt.imsave(name, rimg.reshape(N*configs['img_rows'], M*configs['img_cols']), cmap='gray')
 	#Image.fromarray((255*rimg/np.max(rimg[:])).astype('uint8')).save('test.jpeg')
 	return None
 
