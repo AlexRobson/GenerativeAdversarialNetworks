@@ -1,7 +1,8 @@
 import lasagne
 import time
 import numpy as np
-
+import pdb
+from utils.plotting import create_image
 
 def iterate_minibatches(inputs, targets, batchsize, shuffle=False):
 	assert len(inputs) == len(targets)
@@ -13,15 +14,17 @@ def iterate_minibatches(inputs, targets, batchsize, shuffle=False):
 			excerpt = indices[start_idx:start_idx + batchsize]
 		else:
 			excerpt = slice(start_idx, start_idx + batchsize)
+		yield inputs[excerpt], targets[excerpt]
 
-	yield (inputs[excerpt], targets[excerpt])
 
 
-def run(X_train, y_train, X_test, y_test, X_val, y_val, num_epochs, train_fn, val_fn, val_fn_gen, G_params,configs=None):
+def run(X_train, y_train, X_test, y_test, X_val, y_val, num_epochs, train_fn, val_fn, val_fn_gen, G_params,generate, configs=None):
 
 	shuffleset = configs['shuffleset']
 	batch_size = configs['batch_size']
 	GIN = configs['GIN']
+	C_trainfn = train_fn['discriminator']
+	G_trainfn = train_fn['generator']
 
 	print("Starting training...")
 	# We iterate over epochs:
@@ -49,11 +52,9 @@ def run(X_train, y_train, X_test, y_test, X_val, y_val, num_epochs, train_fn, va
 
 		for batch in iterate_minibatches(X_train, y_train, batch_size, shuffle=shuffleset):
 			inputs, targets= batch
-			Gseed = lasagne.utils.floatX(np.random.rand(len(inputs), GIN, 1,1))
-			loss = np.array(train_fn(Gseed, inputs))
-			epoch_loss['gen'] += loss[0]
-			epoch_loss['discrim'] += loss[1]
-
+			Gseed = lasagne.utils.floatX(np.random.rand(len(inputs), GIN))
+			epoch_loss['gen'] += G_trainfn(Gseed)
+			epoch_loss['discrim'] += C_trainfn(inputs, Gseed)
 			train_batches += 1
 
 		# And a full pass over the validation data:
@@ -65,7 +66,7 @@ def run(X_train, y_train, X_test, y_test, X_val, y_val, num_epochs, train_fn, va
 		for batch in iterate_minibatches(X_val, y_val, batch_size, shuffle=shuffleset):
 			inputs, targets = batch
 			#            err, acc = val_fn(inputs)
-			Gseed = lasagne.utils.floatX(np.random.rand(len(inputs), GIN, 1,1))
+			Gseed = lasagne.utils.floatX(np.random.rand(len(inputs), GIN))
 			err, acc = val_fn(inputs)
 			val_err += err
 			val_acc += acc
@@ -74,8 +75,8 @@ def run(X_train, y_train, X_test, y_test, X_val, y_val, num_epochs, train_fn, va
 			gen_acc += acc
 			val_batches += 1
 
-		train_err['gen'].append(epoch_loss['gen'])
-		train_err['discrim'].append(epoch_loss['discrim'])
+		train_err['gen'].append(epoch_loss['gen'] / train_batches)
+		train_err['discrim'].append(epoch_loss['discrim'] / train_batches)
 		valid_err['discrim'].append(val_err / val_batches)
 		valid_err['gen'].append(gen_err / val_batches)
 		valid_acc['real'].append(val_acc / val_batches * 100)
@@ -91,6 +92,7 @@ def run(X_train, y_train, X_test, y_test, X_val, y_val, num_epochs, train_fn, va
 				val_acc / val_batches * 100))
 		print("  Discriminator[synthetic] acc\t\t\t{:.2f} %".format(
 				gen_acc / val_batches * 100))
+		create_image(generate, 6, 7, name='test_e{}.png'.format(epoch), configs=configs)
 
 	# After training, we compute and print the test error:
 	test_err = 0

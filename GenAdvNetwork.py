@@ -13,11 +13,11 @@ import pdb
 from networks import synthesiser, discriminator
 from run import run
 from utils.plotting import create_image, plotloss
-from utils.saveload import savemodel, load_dataset
+from utils.saveload import savemodel, load_dataset, load_mnist
 
 configs = {}
 configs['img_rows'], configs['img_cols'] = 28,28 # Input image dimensions
-configs['batch_size'] = 128
+configs['batch_size'] = 64
 configs['GIN'] = 100
 configs['shuffleset'] = False
 
@@ -28,10 +28,10 @@ def main(num_epochs=500, configs=configs):
     # https://gist.github.com/f0k/738fa2eedd9666b78404ed1751336f56
     # Prepare Theano variables for inputs. We don't need targets as we'll set them manually
     C_in = T.tensor4('inputs')
-    G_in = T.tensor4('random')
+    G_in = T.matrix('random')
 
     # Load the data
-    (X_train, y_train, X_test,y_test, X_val, y_val) = load_dataset(configs=configs)
+    (X_train, y_train, X_test,y_test, X_val, y_val) = load_mnist()
 
     # Classifier
     C_network = discriminator(C_in, configs=configs)
@@ -44,29 +44,25 @@ def main(num_epochs=500, configs=configs):
 
     real_out = lasagne.layers.get_output(C_network)
     # fake_out, second arg in get_output is optional inputs to pass through to C_network
-    fake_out = lasagne.layers.get_output(C_network,
-                                         lasagne.layers.get_output(G_network),
-                                         deterministic=True)
+    fake_out = lasagne.layers.get_output(C_network, lasagne.layers.get_output(G_network, deterministic=True))
 
     # Define the objective, updates, and training functions
     # Cost = Fakes are class=1, so for generator target is for all to be identified as real (0)
-    eps = 1e-10
-    alfa = 1-1e-5
+#    eps = 1e-10
+#    alfa = 1-1e-5
+    alfa = 1
+    eps = 0
     G_obj = lasagne.objectives.binary_crossentropy((fake_out+eps)*alfa, 1).mean()
     # Cost = Discriminator needs real = 0, and identify fakes as 1
     C_obj = lasagne.objectives.binary_crossentropy((real_out+eps)*alfa, 1).mean()+\
         lasagne.objectives.binary_crossentropy((fake_out+eps)*alfa, 0).mean()
 
+    train_fn = {}
+    C_updates = lasagne.updates.adam(C_obj, C_params, learning_rate=2e-4, beta1=0.5)
+    G_updates = lasagne.updates.adam(G_obj, G_params, learning_rate=2e-4, beta1=0.5)
 
-    updates = lasagne.updates.adam(
-            C_obj, C_params, learning_rate=2e-4, beta1=0.5)
-    updates.update(lasagne.updates.adam(
-        G_obj, G_params, learning_rate=2e-4, beta1=0.5)
-    )
-    train_fn = theano.function([G_in, C_in],
-                               [G_obj,C_obj],
-                               updates=updates,
-                               name='training')
+    train_fn['discriminator'] = theano.function([C_in, G_in],C_obj,updates=C_updates,name='C_training')
+    train_fn['generator'] = theano.function([G_in],G_obj,updates=G_updates,name='G_training')
 
     # Create the theano functions
     classify = theano.function([C_in], C_out)
@@ -96,7 +92,7 @@ def main(num_epochs=500, configs=configs):
         X_test, y_test,
         X_val, y_val,
         num_epochs,
-        train_fn, val_fn, val_gen_fn, G_params, configs=configs)
+        train_fn, val_fn, val_gen_fn, G_params, generate, configs=configs)
 
     networks = {}
     networks['generator'] = G_network
@@ -106,7 +102,7 @@ def main(num_epochs=500, configs=configs):
 
 
 if __name__=='__main__':
-    generate,networks, lossplots = main(num_epochs=500, configs=configs)
+    generate,networks, lossplots = main(num_epochs=20, configs=configs)
     savemodel(networks['generator'], 'generator.npz')
     savemodel(networks['discriminator'], 'discriminator.npz')
     create_image(generate, 6, 7, configs=configs)

@@ -9,11 +9,11 @@ kernel_size = (3,3)
 
 def synthesiser(input_var=None, configs=None):
 
-	network = lasagne.layers.InputLayer(shape=(None, configs['GIN'], 1, 1), input_var=input_var)
+	network = lasagne.layers.InputLayer(shape=(None, configs['GIN']), input_var=input_var)
 	print('L0:'+str(lasagne.layers.get_output_shape(network)))
 	network = batch_norm(DenseLayer(
 			incoming=network,
-			num_units=1024,
+			num_units=1024
 	))
 	print('L1:'+str(lasagne.layers.get_output_shape(network)))
 	network = lasagne.layers.ReshapeLayer(network, (-1, 1024))
@@ -28,17 +28,19 @@ def synthesiser(input_var=None, configs=None):
 	network = batch_norm(Deconv2DLayer(
 			incoming=network,
 			num_filters=64,
-			filter_size=(3,3),
+			filter_size=(5,5),
 			stride=2,
+			crop='same',
+			output_size=14
 	))
 	print('L3:'+str(lasagne.layers.get_output_shape(network)))
 	network = lasagne.layers.Deconv2DLayer(
 			incoming=network,
 			num_filters=1,
-			filter_size=(2,2),
+			filter_size=(5,5),
 			stride=2,
-			crop='full',
-			output_size=28,
+			crop='same',
+			output_size=(28,28),
 			nonlinearity=lasagne.nonlinearities.sigmoid
 	)
 
