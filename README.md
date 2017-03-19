@@ -27,7 +27,7 @@ This is an example of the model training:
 ![example](/examples/test_e12.png?raw=true "Example")
 ![example](/examples/test_e13.png?raw=true "Example")
 ![example](/examples/test_e14.png?raw=true "Example")
-![example](/examples/test_e15..png?raw=true "Example")
+![example](/examples/test_e15.png?raw=true "Example")
 ![example](/examples/test_e16.png?raw=true "Example")
 ![example](/examples/test_e17.png?raw=true "Example")
 ![example](/examples/test_e18.png?raw=true "Example")
