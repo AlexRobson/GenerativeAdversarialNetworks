@@ -13,4 +13,22 @@ https://openai.com/blog/generative-models/
 This is an example of the model training:
 
 ![example](/examples/test_e0.png?raw=true "Example")
-
+![example](/examples/test_e1.png?raw=true "Example")
+![example](/examples/test_e2.png?raw=true "Example")
+![example](/examples/test_e3.png?raw=true "Example")
+![example](/examples/test_e4.png?raw=true "Example")
+![example](/examples/test_e5.png?raw=true "Example")
+![example](/examples/test_e6.png?raw=true "Example")
+![example](/examples/test_e7.png?raw=true "Example")
+![example](/examples/test_e8.png?raw=true "Example")
+![example](/examples/test_e9.png?raw=true "Example")
+![example](/examples/test_e10.png?raw=true "Example")
+![example](/examples/test_e11.png?raw=true "Example")
+![example](/examples/test_e12.png?raw=true "Example")
+![example](/examples/test_e13.png?raw=true "Example")
+![example](/examples/test_e14.png?raw=true "Example")
+![example](/examples/test_e15..png?raw=true "Example")
+![example](/examples/test_e16.png?raw=true "Example")
+![example](/examples/test_e17.png?raw=true "Example")
+![example](/examples/test_e18.png?raw=true "Example")
+![example](/examples/test_e19.png?raw=true "Example")
