@@ -18,7 +18,7 @@ workon DL
 pip install -r requirements.txt
 ```
 
-To run, where
+To run:
 ```
 workon DL
 python 3 GenAdvNetworks.py
