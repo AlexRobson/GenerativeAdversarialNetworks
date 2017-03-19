@@ -10,4 +10,7 @@ https://gist.github.com/rocknrollnerd/06bfed6b9d1bce612fd6
 
 https://openai.com/blog/generative-models/
 
+This is an example of the model training:
+
+![example](/examples/test_e0.png?raw=true "Example")
 
