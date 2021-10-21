@@ -1,6 +1,6 @@
 alabaster==0.7.9
 appdirs==1.4.2
-Babel==2.3.4
+Babel==2.9.1
 bleach==1.5.0
 cycler==0.10.0
 decorator==4.0.11
